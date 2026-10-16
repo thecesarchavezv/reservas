@@ -17,13 +17,13 @@
 // =============================================================
 const CONFIG = {
   TOOL_NAME: 'la herramienta',      // Nombre de la herramienta compartida (ej. "Midjourney")
-  APP_URL: '',                      // URL de GitHub Pages (para los enlaces en los correos)
+  APP_URL: 'https://thecesarchavezv.github.io/reservas/', // URL de GitHub Pages (para los enlaces en los correos)
   TIMEZONE: 'America/Mexico_City',  // Zona horaria por defecto para correos
   BUFFER_MIN: 15,                   // Minutos mínimos entre una reserva y la siguiente
   MIN_DURATION_MIN: 15,             // Duración mínima de una reserva
   MAX_DURATION_MIN: 240,            // Duración máxima de una reserva (4 h)
   MAX_DAYS_AHEAD: 30,               // Hasta cuántos días adelante se puede reservar
-  ALLOWED_DOMAINS: [],              // Ej. ['aplatam.com']. Vacío = cualquier correo
+  ALLOWED_DOMAINS: ['aplatam.com'], // Dominios permitidos. [] = cualquier correo
   CODE_TTL_MIN: 10,                 // Vigencia del código de acceso
   SESSION_DAYS: 30,                 // Días que la sesión queda abierta en el navegador
   SENDER_NAME: 'Reservas AP Latam', // Nombre que aparece como remitente
