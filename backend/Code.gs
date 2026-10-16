@@ -16,7 +16,14 @@
 // CONFIGURACIÓN — edita solo esta sección
 // =============================================================
 const CONFIG = {
-  TOOL_NAME: 'la herramienta',      // Nombre de la herramienta compartida (ej. "Midjourney")
+  // Herramientas que aparecen en el selector. Para agregar una, copia una línea y cámbiala:
+  //   id: identificador corto, sin espacios ni acentos (se usa en el enlace, ej. ?h=semrush)
+  //   name: nombre que ve el equipo
+  // La primera es la que se abre por defecto. No cambies el id de una que ya tenga reservas.
+  TOOLS: [
+    { id: 'edtake', name: 'Edtake' },
+    { id: 'semrush', name: 'Semrush' },
+  ],
   APP_URL: 'https://thecesarchavezv.github.io/reservas/', // URL de GitHub Pages (para los enlaces en los correos)
   TIMEZONE: 'America/Mexico_City',  // Zona horaria por defecto para correos
   BUFFER_MIN: 15,                   // Minutos mínimos entre una reserva y la siguiente
@@ -35,12 +42,25 @@ const CONFIG = {
 const SHEETS = {
   Usuarios: ['email', 'nombre', 'zona_horaria', 'creado'],
   Reservas: ['id', 'email', 'nombre', 'inicio_ms', 'fin_ms', 'inicio', 'fin', 'nota',
-             'estado', 'alerta15', 'alerta5', 'creado', 'actualizado'],
+             'estado', 'alerta15', 'alerta5', 'creado', 'actualizado', 'herramienta'],
   Codigos: ['email', 'hash', 'expira_ms', 'intentos'],
   Sesiones: ['token', 'email', 'expira_ms', 'creado'],
 };
 
 const MIN = 60 * 1000;
+
+function toolIds_() { return CONFIG.TOOLS.map(function (t) { return t.id; }); }
+/** Herramienta de una reserva; las reservas anteriores al selector cuentan como la primera. */
+function toolOf_(r) { return String(r.herramienta || CONFIG.TOOLS[0].id); }
+function toolName_(id) {
+  const t = CONFIG.TOOLS.filter(function (x) { return x.id === id; })[0];
+  return t ? t.name : id;
+}
+function checkTool_(id) {
+  id = String(id || '');
+  if (toolIds_().indexOf(id) === -1) fail_('Elige una herramienta válida.');
+  return id;
+}
 const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
@@ -141,7 +161,7 @@ function apiRequestCode_(b) {
   });
 
   sendMail_(email, 'Tu código de acceso: ' + code, emailLayout_('Tu código de acceso',
-    '<p>Usa este código para entrar a las reservas de ' + esc_(CONFIG.TOOL_NAME) + ':</p>' +
+    '<p>Usa este código para entrar a las reservas de herramientas de AP Latam:</p>' +
     '<p style="font-size:34px;font-weight:700;letter-spacing:8px;color:#003CFA;margin:18px 0">' + code + '</p>' +
     '<p style="color:#6b7474">Vence en ' + CONFIG.CODE_TTL_MIN + ' minutos. Si no lo pediste, ignora este correo.</p>'));
   return { sent: true, isNew: !existing };
@@ -200,7 +220,7 @@ function apiState_(b) {
     user: { email: email, name: u ? u.row.nombre : email },
     reservations: reservations,
     config: {
-      toolName: CONFIG.TOOL_NAME,
+      tools: CONFIG.TOOLS,
       bufferMin: CONFIG.BUFFER_MIN,
       minDurationMin: CONFIG.MIN_DURATION_MIN,
       maxDurationMin: CONFIG.MAX_DURATION_MIN,
@@ -215,17 +235,19 @@ function apiCreate_(b) {
   let start = roundMin_(Number(b.start));
   const end = roundMin_(Number(b.end));
   const note = String(b.note || '').trim().slice(0, 200);
+  const tool = checkTool_(b.tool);
   // "Empezar ahora": si el inicio cae en los últimos 15 min, se ajusta a este minuto.
   const nowMin = Math.floor(Date.now() / MIN) * MIN;
   if (start < nowMin && start >= nowMin - 15 * MIN) start = nowMin;
   return withLock_(function () {
-    validateSlot_(start, end, null, null);
+    validateSlot_(start, end, null, null, tool);
     const u = findRow_('Usuarios', 'email', email);
     const id = Utilities.getUuid().slice(0, 8);
     appendRow_('Reservas', {
       id: id, email: email, nombre: u ? u.row.nombre : email,
       inicio_ms: start, fin_ms: end, inicio: fmtDate_(start, CONFIG.TIMEZONE), fin: fmtDate_(end, CONFIG.TIMEZONE),
       nota: note, estado: 'activa', alerta15: '', alerta5: '', creado: new Date(), actualizado: new Date(),
+      herramienta: tool,
     });
     bumpVersion_();
     return { id: id };
@@ -239,7 +261,7 @@ function apiUpdate_(b) {
   const note = String(b.note || '').trim().slice(0, 200);
   return withLock_(function () {
     const found = ownRes_(b.id, email);
-    validateSlot_(start, end, found.row.id, found.row);
+    validateSlot_(start, end, found.row.id, found.row, toolOf_(found.row));
     const changes = {
       inicio_ms: start, fin_ms: end, inicio: fmtDate_(start, CONFIG.TIMEZONE), fin: fmtDate_(end, CONFIG.TIMEZONE),
       nota: note, actualizado: new Date(),
@@ -287,7 +309,7 @@ function ownRes_(id, email) {
 }
 
 /** Reglas de negocio: duración, ventana permitida y separación de 15 min. */
-function validateSlot_(start, end, ignoreId, existing) {
+function validateSlot_(start, end, ignoreId, existing, tool) {
   const now = Date.now();
   if (!isFinite(start) || !isFinite(end)) fail_('Fecha u hora inválida.');
   if (end <= start) fail_('La hora de fin debe ser posterior a la de inicio.');
@@ -302,11 +324,11 @@ function validateSlot_(start, end, ignoreId, existing) {
   }
   const buf = CONFIG.BUFFER_MIN * MIN;
   const clash = readAll_('Reservas').filter(function (r) {
-    return r.estado === 'activa' && r.id !== ignoreId &&
+    return r.estado === 'activa' && r.id !== ignoreId && toolOf_(r) === tool &&
       start < Number(r.fin_ms) + buf && end > Number(r.inicio_ms) - buf;
   })[0];
   if (clash) {
-    fail_('Choca con la reserva de ' + clash.nombre + ' (' + fmtTime_(Number(clash.inicio_ms), CONFIG.TIMEZONE) + '–' +
+    fail_('Choca con la reserva de ' + clash.nombre + ' en ' + toolName_(tool) + ' (' + fmtTime_(Number(clash.inicio_ms), CONFIG.TIMEZONE) + '–' +
       fmtTime_(Number(clash.fin_ms), CONFIG.TIMEZONE) + ', hora CDMX). Recuerda dejar ' + CONFIG.BUFFER_MIN +
       ' min entre turnos.', 'CONFLICT');
   }
@@ -334,27 +356,28 @@ function checkAlerts() {
     const dur = (end - start) / MIN;
     const tz = (users[normEmail_(r.email)] || {}).zona_horaria || CONFIG.TIMEZONE;
     const rowNum = i + 2;
+    const tool = toolOf_(r), tname = toolName_(tool);
 
     if (!r.alerta15 && left <= 15 && left > 6 && dur >= 25) {
-      sendMail_(r.email, 'Tu turno en ' + CONFIG.TOOL_NAME + ' termina en 15 minutos', emailLayout_(
+      sendMail_(r.email, 'Tu turno en ' + tname + ' termina en 15 minutos', emailLayout_(
         'Te quedan 15 minutos',
-        '<p>Hola ' + esc_(firstName_(r.nombre)) + ', tu turno en ' + esc_(CONFIG.TOOL_NAME) + ' termina a las <b>' +
+        '<p>Hola ' + esc_(firstName_(r.nombre)) + ', tu turno en ' + esc_(tname) + ' termina a las <b>' +
         fmtTime_(end, tz) + '</b>.</p><p>Ve cerrando lo que estás haciendo para que la siguiente persona pueda entrar a tiempo.</p>'));
       sh.getRange(rowNum, col15).setValue(new Date());
     }
     if (!r.alerta5 && left <= 5 && left > -2) {
-      const next = nextFreeSlots_(rows, now, 60, 3);
+      const next = nextFreeSlots_(rows.filter(function (x) { return toolOf_(x) === tool; }), now, 60, 3);
       const list = next.length
-        ? '<p style="margin-top:22px"><b>Próximos espacios libres de 1 hora:</b></p><ul>' + next.map(function (s) {
+        ? '<p style="margin-top:22px"><b>Próximos espacios libres de 1 hora en ' + esc_(tname) + ':</b></p><ul>' + next.map(function (s) {
             return '<li>' + fmtDate_(s, tz) + '</li>';
           }).join('') + '</ul>'
         : '';
-      sendMail_(r.email, 'Quedan 5 minutos: guarda tu trabajo', emailLayout_(
+      sendMail_(r.email, 'Quedan 5 minutos en ' + tname + ': guarda tu trabajo', emailLayout_(
         'Quedan 5 minutos',
         '<p>Hola ' + esc_(firstName_(r.nombre)) + ', tu turno termina a las <b>' + fmtTime_(end, tz) + '</b>.</p>' +
-        '<p><b>Guarda todo tu trabajo y cierra sesión</b> en ' + esc_(CONFIG.TOOL_NAME) + ' para no perder nada.</p>' +
+        '<p><b>Guarda todo tu trabajo y cierra sesión</b> en ' + esc_(tname) + ' para no perder nada.</p>' +
         '<p>¿Necesitas más tiempo? Agenda un nuevo espacio cuando quieras.</p>' + list +
-        (CONFIG.APP_URL ? button_(CONFIG.APP_URL + '?reservar=1', 'Reservar otro turno') : '')));
+        (CONFIG.APP_URL ? button_(CONFIG.APP_URL + '?h=' + encodeURIComponent(tool) + '&reservar=1', 'Reservar otro turno') : '')));
       sh.getRange(rowNum, col5).setValue(new Date());
     }
   });
@@ -396,7 +419,7 @@ function auth_(token) {
 function publicRes_(r) {
   return {
     id: String(r.id), email: normEmail_(r.email), name: String(r.nombre),
-    start: Number(r.inicio_ms), end: Number(r.fin_ms), note: String(r.nota || ''),
+    start: Number(r.inicio_ms), end: Number(r.fin_ms), note: String(r.nota || ''), tool: toolOf_(r),
   };
 }
 

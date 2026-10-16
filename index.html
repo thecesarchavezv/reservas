@@ -84,7 +84,18 @@ button{cursor:pointer}
 .avatar{width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,.18);display:grid;place-items:center;font-weight:700;font-size:13px}
 .notify-btn{font-size:13px;padding:6px 12px}
 
-.status{max-width:1240px;margin:0 auto;padding:26px 24px 8px;display:grid;grid-template-columns:1fr auto;gap:24px;align-items:end}
+/* Selector de herramienta */
+.toolpick{max-width:1240px;margin:0 auto;padding:10px 24px 0;display:flex;gap:10px;flex-wrap:wrap}
+.toolbtn{display:inline-flex;align-items:center;gap:10px;border:0;border-radius:999px;padding:9px 18px 9px 14px;background:rgba(255,255,255,.12);color:#fff;font-weight:600;font-size:15px;transition:background .15s}
+.toolbtn:hover{background:rgba(255,255,255,.2)}
+.toolbtn[aria-pressed="true"]{background:#fff;color:var(--blue)}
+.toolbtn .mini{width:9px;height:9px;border-radius:50%;background:var(--lime)}
+.toolbtn .mini.busy{background:var(--coral)}
+.toolbtn .mini.mine{background:var(--cyan);box-shadow:0 0 0 1.5px var(--blue)}
+.toolbtn small{font-weight:400;font-size:13px;opacity:.8}
+.pill.tool{background:var(--surface);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line)}
+
+.status{max-width:1240px;margin:0 auto;padding:22px 24px 8px;display:grid;grid-template-columns:1fr auto;gap:24px;align-items:end}
 .status-kicker{display:inline-flex;align-items:center;gap:10px;font-size:15px;font-weight:500;margin-bottom:6px}
 .dot{width:12px;height:12px;border-radius:50%;background:var(--lime);box-shadow:0 0 0 4px rgba(150,190,18,.28)}
 .dot.busy{background:var(--coral);box-shadow:0 0 0 4px rgba(255,78,80,.3)}
@@ -227,7 +238,8 @@ main{max-width:1240px;margin:0 auto;padding:22px 24px 60px}
   .topbar{padding:14px 16px}
   .topbar .tool{display:none}
   .who .name{display:none}
-  .status,.ribbon-wrap,main{padding-left:16px;padding-right:16px}
+  .status,.ribbon-wrap,main,.toolpick{padding-left:16px;padding-right:16px}
+  .toolbtn small{display:none}
   .grid3{grid-template-columns:1fr 1fr}
   .grid3 .field:first-child{grid-column:1/-1}
   .toolbar{gap:8px}
@@ -268,6 +280,7 @@ const S = {
   token: lsGet('rap_token'), user: null, reservations: [], config: null, version: 0, offset: 0,
   tab: 'week', weekStart: null, mobileDay: null, loginStep: 'email', loginEmail: lsGet('rap_email') || '',
   modal: null, alert: null, scrollSet: false,
+  tool: new URLSearchParams(location.search).get('h') || lsGet('rap_tool') || '',
 };
 let pollTimer = null, tickTimer = null;
 
@@ -295,6 +308,7 @@ async function loadState(force){
   S.offset = j.now - Date.now();
   if (!j.unchanged){
     S.version = j.version; S.user = j.user; S.config = j.config; S.reservations = j.reservations;
+    if (!tools().some(t => t.id === S.tool)) setTool(S.tool);
     return true;
   }
   return false;
@@ -329,11 +343,19 @@ const initials = n => String(n||'?').split(' ').filter(Boolean).slice(0,2).map(w
 /* ---------------------------------------------------------
    Reglas (las mismas del servidor, para validar al instante)
    --------------------------------------------------------- */
-const cfg = () => S.config || { bufferMin:15, minDurationMin:15, maxDurationMin:240, maxDaysAhead:30, toolName:'la herramienta' };
+const cfg = () => S.config || { bufferMin:15, minDurationMin:15, maxDurationMin:240, maxDaysAhead:30, tools:[] };
+const tools = () => cfg().tools || [];
+const toolName = id => (tools().find(t => t.id === id) || {}).name || 'la herramienta';
+const TR = () => S.reservations.filter(r => r.tool === S.tool);   // reservas de la herramienta elegida
+function setTool(id){
+  if (!tools().some(t => t.id === id)) id = tools()[0] ? tools()[0].id : '';
+  S.tool = id; lsSet('rap_tool', id);
+  const u = new URL(location.href); if (id) u.searchParams.set('h', id); history.replaceState(null, '', u);
+}
 const isMine = r => S.user && r.email === S.user.email;
 function clashWith(start, end, ignoreId){
   const buf = cfg().bufferMin * MIN;
-  return S.reservations.find(r => r.id !== ignoreId && start < r.end + buf && end > r.start - buf);
+  return TR().find(r => r.id !== ignoreId && start < r.end + buf && end > r.start - buf);
 }
 function slotError(start, end, existing){
   const c = cfg(), t = now();
@@ -351,7 +373,7 @@ function slotError(start, end, existing){
 }
 function freeSlots(from, durMin, count, ignoreId){
   const buf = cfg().bufferMin*MIN, d = durMin*MIN, step = 15*MIN;
-  const busy = S.reservations.filter(r => r.id !== ignoreId && r.end > from).map(r => [r.start-buf, r.end+buf]).sort((a,b)=>a[0]-b[0]);
+  const busy = TR().filter(r => r.id !== ignoreId && r.end > from).map(r => [r.start-buf, r.end+buf]).sort((a,b)=>a[0]-b[0]);
   const out = []; let t = Math.max(from, now());
   t = Math.ceil(t/step)*step;
   for (let g=0; g<3000 && out.length<count; g++){
@@ -362,8 +384,8 @@ function freeSlots(from, durMin, count, ignoreId){
   }
   return out;
 }
-function currentRes(){ const t = now(); return S.reservations.find(r => r.start <= t && r.end > t); }
-function nextRes(){ const t = now(); return S.reservations.filter(r => r.start > t).sort((a,b)=>a.start-b.start)[0]; }
+function currentRes(tool){ const t = now(); return S.reservations.find(r => r.tool === (tool || S.tool) && r.start <= t && r.end > t); }
+function nextRes(){ const t = now(); return TR().filter(r => r.start > t).sort((a,b)=>a.start-b.start)[0]; }
 
 /* ---------------------------------------------------------
    Render principal
@@ -471,24 +493,24 @@ function signOut(expired){
 
 /* ---------- Franja de estado ---------- */
 function bandView(){
-  const c = cfg(), t = now(), cur = currentRes(), nx = nextRes(), u = S.user;
+  const c = cfg(), t = now(), cur = currentRes(), nx = nextRes(), u = S.user, tname = toolName(S.tool);
   let kicker, title, text, side = '', actions;
   if (cur && isMine(cur)){
     kicker = '<span class="dot mine"></span> En uso por ti';
     title = 'Es tu turno';
-    text = 'Tienes ' + esc(c.toolName) + ' hasta las ' + dotEnd(time(cur.end)) + ' Al terminar, guarda tu trabajo y cierra sesión.';
+    text = 'Tienes ' + esc(tname) + ' hasta las ' + dotEnd(time(cur.end)) + ' Al terminar, guarda tu trabajo y cierra sesión.';
     side = `<div class="countdown" aria-live="polite">${countdownText(cur.end - t)}<small>restantes</small></div>`;
     actions = `<button class="btn btn-white" data-act="extend" data-id="${cur.id}">Cambiar hora de fin</button><button class="btn btn-ghost-w" data-act="release" data-id="${cur.id}">Liberar ahora</button>`;
   } else if (cur){
     const free = cur.end + c.bufferMin*MIN;
     kicker = '<span class="dot busy"></span> Ocupada';
-    title = 'En uso por ' + esc(firstName(cur.name));
+    title = esc(tname) + ' en uso por ' + esc(firstName(cur.name));
     text = esc(cur.name) + ' la tiene hasta las ' + dotEnd(time(cur.end)) + ' Queda libre para el siguiente turno a partir de las ' + dotEnd(time(free));
     side = `<div class="countdown" aria-live="polite">${countdownText(cur.end - t)}<small>para que termine</small></div>`;
     actions = `<button class="btn btn-white" data-act="new-after">Reservar el siguiente espacio</button>`;
   } else {
     kicker = '<span class="dot"></span> Disponible';
-    title = 'Libre ahora';
+    title = esc(tname) + ' está libre';
     if (nx){
       const gapEnd = nx.start - c.bufferMin*MIN;
       const canUse = (gapEnd - t)/MIN;
@@ -506,12 +528,13 @@ function bandView(){
   return `<header class="band">
     <div class="topbar">
       <img src="${LOGO_BLANCO}" alt="AP Latam">
-      <span class="tool">Reservas de ${esc(c.toolName)}</span>
+      <span class="tool">Reservas de herramientas</span>
       <span class="spacer"></span>
       ${notif}
       <div class="who"><span class="avatar" aria-hidden="true">${esc(initials(u.name))}</span><span class="name">${esc(u.name)}</span>
         <button class="btn btn-ghost-w btn-sm" data-act="logout">Salir</button></div>
     </div>
+    ${toolPickView()}
     <div class="status">
       <div><div class="status-kicker">${kicker}</div><h1>${title}</h1><p>${text}</p></div>
       <div class="status-side">${side}<div class="status-actions">${actions}</div></div>
@@ -520,9 +543,20 @@ function bandView(){
   </header>`;
 }
 
+function toolPickView(){
+  const ts = tools(); if (ts.length < 2) return '';
+  const t = now();
+  return `<nav class="toolpick" aria-label="Herramienta">${ts.map(x => {
+    const cur = currentRes(x.id);
+    const cls = cur ? (isMine(cur) ? 'mine' : 'busy') : '';
+    const lbl = cur ? (isMine(cur) ? 'En tu turno' : 'En uso') : 'Libre';
+    return `<button class="toolbtn" data-tool="${esc(x.id)}" aria-pressed="${x.id === S.tool}"><span class="mini ${cls}" aria-hidden="true"></span>${esc(x.name)} <small>${lbl}</small></button>`;
+  }).join('')}</nav>`;
+}
+
 function ribbonView(){
   const t = now(), d0 = sod(t);
-  const todays = S.reservations.filter(r => r.end > d0 && r.start < addDays(d0,1));
+  const todays = TR().filter(r => r.end > d0 && r.start < addDays(d0,1));
   let h0 = 7, h1 = 22;
   todays.forEach(r => { h0 = Math.min(h0, new Date(Math.max(r.start,d0)).getHours()); h1 = Math.max(h1, Math.ceil((Math.min(r.end, addDays(d0,1)) - d0)/3600000)); });
   h0 = Math.min(h0, new Date(t).getHours()); h1 = Math.max(h1, new Date(t).getHours()+1);
@@ -538,7 +572,7 @@ function ribbonView(){
   const step = (h1-h0) > 14 ? 3 : 2;
   for (let h = Math.ceil(h0/step)*step; h <= h1; h += step){ const p = pct(d0 + h*3600000); if (p > 2 && p < 98) ticks += `<span style="left:${p}%">${h}:00</span>`; }
   return `<div class="ribbon-wrap">
-    <div class="ribbon-head"><span>Hoy, ${esc(fDayLong.format(t))}</span><span>${todays.length ? todays.length + (todays.length === 1 ? ' turno' : ' turnos') : 'Sin turnos'}</span></div>
+    <div class="ribbon-head"><span>${esc(toolName(S.tool))} hoy, ${esc(fDayLong.format(t))}</span><span>${todays.length ? todays.length + (todays.length === 1 ? ' turno' : ' turnos') : 'Sin turnos'}</span></div>
     <div class="ribbon" id="ribbon" data-a="${a}" data-b="${b}" role="img" aria-label="Turnos de hoy">
       <div class="past" style="width:${pct(t)}%"></div>${segs}<div class="now" style="left:${pct(t)}%"></div>
     </div>
@@ -555,7 +589,7 @@ function toolbarView(){
   const myCount = S.reservations.filter(r => isMine(r) && r.end > now()).length;
   return `<div class="toolbar">
     <div class="tabs" role="tablist">
-      <button class="tab" role="tab" aria-selected="${S.tab==='week'}" data-tab="week">Calendario</button>
+      <button class="tab" role="tab" aria-selected="${S.tab==='week'}" data-tab="week">Calendario de ${esc(toolName(S.tool))}</button>
       <button class="tab" role="tab" aria-selected="${S.tab==='mine'}" data-tab="mine">Mis reservas${myCount ? ' (' + myCount + ')' : ''}</button>
     </div>
     ${S.tab === 'week' ? `<div class="weeknav">
@@ -589,7 +623,7 @@ function weekView(){
     const de = addDays(d,1);
     let inner = '';
     if (t > d) inner += `<div class="pastfill" style="height:${Math.min(24, (Math.min(t,de)-d)/3600000)*H}px"></div>`;
-    S.reservations.filter(r => r.end + buf > d && r.start - buf < de).forEach(r => {
+    TR().filter(r => r.end + buf > d && r.start - buf < de).forEach(r => {
       const top = Math.max(0,(r.start - d)/3600000*H), bot = Math.min(24*H,(r.end - d)/3600000*H);
       const bt = Math.max(0,(r.start - buf - d)/3600000*H), bb = Math.min(24*H,(r.end + buf - d)/3600000*H);
       inner += `<div class="bufband" style="top:${bt}px;height:${bb-bt}px"></div>`;
@@ -622,7 +656,7 @@ function mineView(){
     const live = r.start <= t && r.end > t;
     return `<div class="row">
       <div class="when"><b>${time(r.start)} – ${time(r.end)}</b><span>${dur((r.end-r.start)/MIN)}${isPast ? ' · ' + esc(relDay(r.start)) : ''}</span></div>
-      <div class="note">${live ? '<span class="pill live">En curso</span> ' : ''}${esc(r.note || '')}</div>
+      <div class="note">${tools().length > 1 ? '<span class="pill tool">' + esc(toolName(r.tool)) + '</span> ' : ''}${live ? '<span class="pill live">En curso</span> ' : ''}${esc(r.note || '')}</div>
       ${isPast ? '' : `<div class="acts">
         <button class="btn btn-quiet btn-sm" data-act="ics" data-id="${r.id}">Agregar a mi calendario</button>
         <button class="btn btn-quiet btn-sm" data-act="edit" data-id="${r.id}">Editar</button>
@@ -662,7 +696,7 @@ function modalView(){
   const sugs = freeSlots(Math.max(sod(M.start), t), Math.max(cfg().minDurationMin, Math.min(durMin, cfg().maxDurationMin)), 4, M.id)
     .filter(s => s !== M.start);
   return `<div class="overlay" data-close="1"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="m-title">
-    <div class="modal-head"><h2 id="m-title">${ex ? 'Editar reserva' : 'Nueva reserva'}</h2><button class="x" data-act="close" aria-label="Cerrar">×</button></div>
+    <div class="modal-head"><h2 id="m-title">${ex ? 'Editar reserva' : 'Nueva reserva'} en ${esc(toolName(S.tool))}</h2><button class="x" data-act="close" aria-label="Cerrar">×</button></div>
     <form class="modal-body" id="m-form" novalidate>
       <div class="grid3">
         <label class="field"><span>Día</span><input class="input" type="date" id="m-date" value="${dateStr(M.start)}" min="${dateStr(t)}" max="${dateStr(t + cfg().maxDaysAhead*DAY)}" ${started?'disabled':''}></label>
@@ -687,13 +721,14 @@ function openNew(start, durMin){
   // ajusta la duración al hueco disponible si choca
   let end = start + durMin*MIN;
   const buf = cfg().bufferMin*MIN;
-  const nxt = S.reservations.filter(r => r.start - buf >= start).sort((a,b)=>a.start-b.start)[0];
+  const nxt = TR().filter(r => r.start - buf >= start).sort((a,b)=>a.start-b.start)[0];
   if (nxt && end > nxt.start - buf && nxt.start - buf - start >= cfg().minDurationMin*MIN){ end = Math.floor((nxt.start - buf)/(15*MIN))*15*MIN; if (end - start < cfg().minDurationMin*MIN) end = nxt.start - buf; }
   S.modal = { id:null, start, end, note:'' };
   render();
 }
 function openEdit(id){
   const r = S.reservations.find(x => x.id === id); if (!r) return;
+  if (r.tool !== S.tool) setTool(r.tool);
   S.modal = { id, start:r.start, end:r.end, note:r.note };
   render();
 }
@@ -702,21 +737,21 @@ function openEdit(id){
 function alertView(){
   const A = S.alert; if (!A) return '';
   const r = S.reservations.find(x => x.id === A.id) || A.res;
-  const c = cfg();
+  const tname = toolName(r.tool);
   const next = freeSlots(now(), 60, 3);
   const sugs = next.length ? `<p class="label-sm" style="margin-top:6px">Próximos espacios libres de 1 h</p><div class="sugs" style="justify-content:center">${next.map(s => `<button type="button" class="sug" data-sug-new="${s}">${esc(relDay(s) === 'Hoy' || relDay(s) === 'Mañana' ? relDay(s) : fDayShort.format(s).replace('.','') + ' ' + new Date(s).getDate())} ${time(s)}</button>`).join('')}</div>` : '';
   let top, body, foot;
   if (A.kind === '15'){
-    top = `<div class="alert-top t15"><div class="big">15</div><h2>minutos para terminar</h2></div>`;
+    top = `<div class="alert-top t15"><div class="big">15</div><h2>minutos para terminar en ${esc(tname)}</h2></div>`;
     body = `<p>Tu turno termina a las <b>${time(r.end)}</b>. Ve cerrando lo que estás haciendo.</p>`;
     foot = `<button class="btn btn-quiet" data-act="close-alert">Entendido</button><button class="btn btn-primary" data-act="extend" data-id="${r.id}">Pedir más tiempo</button>`;
   } else if (A.kind === '5'){
     top = `<div class="alert-top t5"><div class="big">5</div><h2>minutos: guarda tu trabajo</h2></div>`;
-    body = `<p><b>Guarda todo y cierra sesión</b> en ${esc(c.toolName)} antes de las ${time(r.end)} para no perder nada.</p><p>¿Te falta tiempo? Agenda otro espacio.</p>${sugs}`;
+    body = `<p><b>Guarda todo y cierra sesión</b> en ${esc(tname)} antes de las ${time(r.end)} para no perder nada.</p><p>¿Te falta tiempo? Agenda otro espacio.</p>${sugs}`;
     foot = `<button class="btn btn-quiet" data-act="close-alert">Ya guardé</button><button class="btn btn-primary" data-act="new-from-alert">Reservar otro turno</button>`;
   } else {
-    top = `<div class="alert-top tend"><div class="big">✓</div><h2>Tu turno terminó</h2></div>`;
-    body = `<p>Gracias por liberar ${esc(c.toolName)} a tiempo. ¿Quieres apartar tu siguiente espacio?</p>${sugs}`;
+    top = `<div class="alert-top tend"><div class="big">✓</div><h2>Tu turno en ${esc(tname)} terminó</h2></div>`;
+    body = `<p>Gracias por liberar ${esc(tname)} a tiempo. ¿Quieres apartar tu siguiente espacio?</p>${sugs}`;
     foot = `<button class="btn btn-quiet" data-act="close-alert">Ahora no</button><button class="btn btn-primary" data-act="new-from-alert">Reservar otro turno</button>`;
   }
   return `<div class="overlay"><div class="modal alert-modal" role="alertdialog" aria-modal="true">${top}<div class="alert-body">${body}</div><div class="modal-foot" style="justify-content:center">${foot}</div></div></div>`;
@@ -733,16 +768,18 @@ function checkAlerts(){
   mine.forEach(r => {
     const left = (r.end - t)/MIN, d = (r.end - r.start)/MIN, key = 'rap_al_' + r.id + '_' + r.end;
     const shown = lsGet(key) || '';
-    const fire = (kind, title, body) => { lsSet(key, shown + kind); S.alert = { kind, id: r.id, res: r }; S.modal = null; render(); notify(title, body); };
-    if (left <= 0 && !shown.includes('e')) fire('e', 'Tu turno terminó', '¿Quieres reservar otro espacio?');
-    else if (left > 0 && left <= 5 && !shown.includes('5')) fire('5', 'Quedan 5 minutos', 'Guarda tu trabajo y cierra sesión en ' + cfg().toolName + '.');
-    else if (left > 5 && left <= 15 && d >= 25 && !shown.includes('1')) fire('1', 'Tu turno termina en 15 minutos', 'Ve cerrando lo que estás haciendo.');
+    const fire = (kind, title, body) => { lsSet(key, shown + kind); if (r.tool !== S.tool) setTool(r.tool); S.alert = { kind, id: r.id, res: r }; S.modal = null; render(); notify(title, body); };
+    const tn = toolName(r.tool);
+    if (left <= 0 && !shown.includes('e')) fire('e', 'Tu turno en ' + tn + ' terminó', '¿Quieres reservar otro espacio?');
+    else if (left > 0 && left <= 5 && !shown.includes('5')) fire('5', 'Quedan 5 minutos en ' + tn, 'Guarda tu trabajo y cierra sesión en ' + tn + '.');
+    else if (left > 5 && left <= 15 && d >= 25 && !shown.includes('1')) fire('1', 'Tu turno en ' + tn + ' termina en 15 minutos', 'Ve cerrando lo que estás haciendo.');
   });
 }
 
 /* ---------- Eventos ---------- */
 function bindApp(){
   document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; render(); });
+  document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => { setTool(b.dataset.tool); S.tab = 'week'; render(); });
   document.querySelectorAll('[data-day]').forEach(b => b.onclick = () => { S.mobileDay = +b.dataset.day; render(); });
   document.querySelectorAll('[data-ev]').forEach(b => b.onclick = e => {
     e.stopPropagation();
@@ -812,7 +849,7 @@ async function action(act, id){
       const ex = M.id ? S.reservations.find(r => r.id === M.id) : null;
       const err = slotError(M.start, M.end, ex); if (err) return toast(err, true);
       const btn = $('[data-act=save]'); if (btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
-      const ok = await mutate(M.id ? 'update' : 'create', { id: M.id, start: M.start, end: M.end, note: M.note }, M.id ? 'Cambios guardados.' : 'Reservado: ' + whenText(M.start) + ' a ' + time(M.end));
+      const ok = await mutate(M.id ? 'update' : 'create', { id: M.id, tool: S.tool, start: M.start, end: M.end, note: M.note }, M.id ? 'Cambios guardados.' : 'Reservado: ' + whenText(M.start) + ' a ' + time(M.end));
       if (ok) { S.modal = null; render(); }
       else if (btn){ btn.disabled = false; btn.textContent = M.id ? 'Guardar cambios' : 'Reservar'; }
       return;
@@ -843,15 +880,15 @@ function download(name, content, type){
 function downloadCsv(){
   const q = v => '"' + String(v ?? '').replace(/"/g,'""') + '"';
   const fd = new Intl.DateTimeFormat('es-MX', { year:'numeric', month:'2-digit', day:'2-digit' });
-  const rows = [['Nombre','Correo','Fecha','Inicio','Fin','Duración (min)','Nota']];
-  S.reservations.slice().sort((a,b)=>a.start-b.start).forEach(r => rows.push([r.name, r.email, fd.format(r.start), time(r.start), time(r.end), Math.round((r.end-r.start)/MIN), r.note]));
+  const rows = [['Herramienta','Nombre','Correo','Fecha','Inicio','Fin','Duración (min)','Nota']];
+  S.reservations.slice().sort((a,b)=>a.start-b.start).forEach(r => rows.push([toolName(r.tool), r.name, r.email, fd.format(r.start), time(r.start), time(r.end), Math.round((r.end-r.start)/MIN), r.note]));
   download('reservas-' + dateStr(now()) + '.csv', '﻿' + rows.map(r => r.map(q).join(',')).join('\r\n'), 'text/csv;charset=utf-8');
   toast('CSV descargado con ' + (rows.length-1) + ' reservas.');
 }
 function downloadIcs(r){
   if (!r) return;
   const z = ms => new Date(ms).toISOString().replace(/[-:]/g,'').replace(/\.\d{3}/,'');
-  const tool = cfg().toolName;
+  const tool = toolName(r.tool);
   const ics = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//AP Latam//Reservas//ES','CALSCALE:GREGORIAN','BEGIN:VEVENT',
     'UID:rap-' + r.id + '@aplatam', 'DTSTAMP:' + z(Date.now()), 'DTSTART:' + z(r.start), 'DTEND:' + z(r.end),
     'SUMMARY:Turno en ' + tool, 'DESCRIPTION:' + (r.note ? r.note.replace(/[,;\\]/g, m => '\\' + m) + '\\n' : '') + 'Reserva hecha en ' + location.href.split('?')[0],

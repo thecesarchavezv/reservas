@@ -25,7 +25,7 @@ Archivos que vas a usar:
 2. En el menú, entra a **Extensiones › Apps Script**. Se abre una pestaña nueva.
 3. Borra todo lo que aparece en el archivo `Código.gs` y pega el contenido completo de `backend/Code.gs`.
 4. Arriba del código está la sección **CONFIGURACIÓN**. Cambia al menos esto:
-   - `TOOL_NAME`: el nombre de la herramienta, por ejemplo `'Midjourney'`.
+   - `TOOLS`: la lista de herramientas del selector (hoy, Edtake y Semrush). Ver "Agregar una herramienta" más abajo.
    - `ALLOWED_DOMAINS`: te recomiendo `['aplatam.com']` para que solo entren correos del equipo. Si hay colaboradores con otros correos, agrega sus dominios o déjalo vacío `[]`.
    - Deja `APP_URL` vacío por ahora; lo llenas en el paso 14.
 5. Da clic en el ícono de disco (**Guardar**).
@@ -93,6 +93,28 @@ Sugiéreles dar clic en **Activar avisos** (arriba a la derecha) para recibir ta
 - **Exportar:** botón **Exportar CSV** (abre en Excel) y, en cada reserva propia, **Agregar a mi calendario** (archivo .ics para Outlook o Google Calendar).
 - **Zonas horarias:** cada persona ve las horas en su zona; los correos usan la zona de quien los recibe.
 - **Historial:** la hoja de Google guarda todas las reservas, incluidas las canceladas, por si quieres revisar el uso.
+
+## Agregar una herramienta
+
+1. En Apps Script, busca `TOOLS:` dentro de CONFIG. Verás:
+
+   ```js
+   TOOLS: [
+     { id: 'edtake', name: 'Edtake' },
+     { id: 'semrush', name: 'Semrush' },
+   ],
+   ```
+
+2. Copia una línea y cámbiala, por ejemplo:
+
+   ```js
+     { id: 'canva', name: 'Canva Pro' },
+   ```
+
+   El `id` va en minúsculas, sin espacios ni acentos; el `name` es lo que ve el equipo. No cambies el `id` de una herramienta que ya tenga reservas.
+3. Guarda y publica una nueva versión (paso 14). La herramienta aparece en el selector sin tocar GitHub.
+
+Cada herramienta tiene su propio enlace directo para compartir con su equipo: `https://thecesarchavezv.github.io/reservas/?h=semrush` (cambia `semrush` por el `id`).
 
 ## Ajustes en CONFIG (Code.gs)
 
