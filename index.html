@@ -343,7 +343,7 @@ const initials = n => String(n||'?').split(' ').filter(Boolean).slice(0,2).map(w
 /* ---------------------------------------------------------
    Reglas (las mismas del servidor, para validar al instante)
    --------------------------------------------------------- */
-const cfg = () => S.config || { bufferMin:15, minDurationMin:15, maxDurationMin:240, maxDaysAhead:30, tools:[] };
+const cfg = () => S.config || { bufferMin:15, minDurationMin:15, maxDurationMin:180, maxDaysAhead:30, maxMinPerDay:180, dailyLimitPerTool:true, tools:[] };
 const tools = () => cfg().tools || [];
 const toolName = id => (tools().find(t => t.id === id) || {}).name || 'la herramienta';
 const TR = () => S.reservations.filter(r => r.tool === S.tool);   // reservas de la herramienta elegida
@@ -357,11 +357,50 @@ function clashWith(start, end, ignoreId){
   const buf = cfg().bufferMin * MIN;
   return TR().find(r => r.id !== ignoreId && start < r.end + buf && end > r.start - buf);
 }
+/* Límite diario por persona (mismas reglas que el servidor, en la zona horaria del servidor) */
+let fDayKey = null;
+function dayKey(ms){
+  if (!fDayKey) { try { fDayKey = new Intl.DateTimeFormat('en-CA', { timeZone: cfg().timezone || 'America/Mexico_City', year:'numeric', month:'2-digit', day:'2-digit' }); } catch(e){ fDayKey = new Intl.DateTimeFormat('en-CA'); } }
+  return fDayKey.format(ms);
+}
+function minutesByDay(start, end, acc){
+  acc = acc || {};
+  if (dayKey(start) === dayKey(end - 1)) { const k = dayKey(start); acc[k] = (acc[k] || 0) + (end - start)/MIN; return acc; }
+  for (let x = start; x < end; x += MIN) { const k = dayKey(x); acc[k] = (acc[k] || 0) + 1; }
+  return acc;
+}
+function myDailyUse(ignoreId){
+  const c = cfg(), used = {};
+  S.reservations.filter(r => isMine(r) && r.id !== ignoreId && (!c.dailyLimitPerTool || r.tool === S.tool))
+    .forEach(r => minutesByDay(r.start, r.end, used));
+  return used;
+}
+function dailyLimitError(start, end, ignoreId){
+  const c = cfg(); if (!c.maxMinPerDay) return '';
+  const wanted = minutesByDay(start, end), used = myDailyUse(ignoreId);
+  for (const k of Object.keys(wanted)){
+    const already = used[k] || 0;
+    if (already + wanted[k] > c.maxMinPerDay){
+      const left = Math.max(0, c.maxMinPerDay - already);
+      return 'Superaste el máximo de ' + dur(c.maxMinPerDay) + ' por día. Como la herramienta es compartida, te invitamos a aprovechar al máximo tu tiempo asignado para dar espacio a los demás compañeros.' +
+        (left > 0 ? ' Ese día aún puedes reservar hasta ' + dur(left) + '.' : ' Ya usaste todo tu tiempo de ese día.');
+    }
+  }
+  return '';
+}
+function dailyLeft(start, end, ignoreId){
+  const c = cfg(); if (!c.maxMinPerDay) return null;
+  const used = myDailyUse(ignoreId), k = dayKey(start);
+  minutesByDay(start, end, used);
+  return Math.max(0, c.maxMinPerDay - (used[k] || 0));
+}
 function slotError(start, end, existing){
   const c = cfg(), t = now();
   if (!(end > start)) return 'La hora de fin debe ser posterior a la de inicio.';
   const d = (end-start)/MIN;
   if (d < c.minDurationMin) return 'La reserva mínima es de ' + c.minDurationMin + ' minutos.';
+  const dl = dailyLimitError(start, end, existing && existing.id);
+  if (dl) return dl;
   if (d > c.maxDurationMin) return 'La reserva máxima es de ' + dur(c.maxDurationMin) + '.';
   const keeps = existing && existing.start === start && start <= t;
   if (start < t - 15*MIN && !keeps) return 'Esa hora ya pasó.';
@@ -703,7 +742,7 @@ function modalView(){
         <label class="field"><span>Inicio</span><select class="input" id="m-start" ${started?'disabled':''}>${timeOptions(M.start, sod(M.start), M.start)}</select></label>
         <label class="field"><span>Fin</span><select class="input" id="m-end">${endOptions(M.start, M.end)}</select></label>
       </div>
-      <div class="check ${err ? 'bad' : 'ok'}" role="status">${err ? esc(err) : '✓ Disponible: ' + esc(whenText(M.start)) + ' a ' + time(M.end) + ' (' + dur(durMin) + ')'}</div>
+      <div class="check ${err ? 'bad' : 'ok'}" role="status">${err ? esc(err) : '✓ Disponible: ' + esc(whenText(M.start)) + ' a ' + time(M.end) + ' (' + dur(durMin) + ')' + (() => { const l = dailyLeft(M.start, M.end, M.id); return l == null ? '' : l > 0 ? (l === 60 ? '. Te quedará 1 h disponible ese día.' : '. Te quedarán ' + dur(l) + ' disponibles ese día.') : '. Con esta reserva completas tu tiempo de ese día.'; })()}</div>
       ${!started && sugs.length ? `<p class="label-sm">Espacios libres de ${dur(durMin)}</p><div class="sugs">${sugs.map(s => `<button type="button" class="sug" data-sug="${s}">${esc(relDay(s) === 'Hoy' || relDay(s) === 'Mañana' ? relDay(s) : fDayShort.format(s).replace('.','') + ' ' + new Date(s).getDate())} ${time(s)}</button>`).join('')}</div>` : ''}
       <label class="field"><span>Nota (opcional)</span><input class="input" id="m-note" maxlength="200" value="${esc(M.note || '')}" placeholder="¿En qué vas a trabajar?"></label>
     </form>

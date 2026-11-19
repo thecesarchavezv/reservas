@@ -88,6 +88,7 @@ Sugiéreles dar clic en **Activar avisos** (arriba a la derecha) para recibir ta
 
 - **Margen de 15 minutos:** nadie puede reservar a menos de 15 minutos del turno de otra persona. La app lo muestra rayado en gris y lo valida en el servidor.
 - **Alertas:** a quien tiene el turno le llega un correo 15 minutos antes de terminar (solo en turnos de 25 minutos o más) y otro 5 minutos antes, con la invitación a guardar su trabajo y reservar otro espacio. Si tiene la app abierta, también ve el aviso en pantalla.
+- **Máximo 3 horas por día:** cada persona puede reservar hasta 3 horas por día calendario en cada herramienta, repartidas como quiera (2 + 1, 1 + 1 + 1, 0.5 + 1.5 + 1…). Cuentan las reservas ya usadas y las próximas; cancelar o liberar devuelve el tiempo.
 - **Liberar ahora:** si alguien termina antes, puede liberar la herramienta y el espacio queda disponible de inmediato.
 - **Autogestión:** cada quien crea, cambia y cancela solo sus propias reservas. No hay administrador.
 - **Exportar:** botón **Exportar CSV** (abre en Excel) y, en cada reserva propia, **Agregar a mi calendario** (archivo .ics para Outlook o Google Calendar).
@@ -122,7 +123,9 @@ Cada herramienta tiene su propio enlace directo para compartir con su equipo: `h
 |---|---|---|
 | `BUFFER_MIN` | Minutos entre turnos | 15 |
 | `MIN_DURATION_MIN` | Duración mínima de una reserva | 15 |
-| `MAX_DURATION_MIN` | Duración máxima de una reserva | 240 (4 h) |
+| `MAX_DURATION_MIN` | Duración máxima de una sola reserva | 180 (3 h) |
+| `MAX_MIN_PER_DAY` | Máximo de minutos por persona por día calendario, en cualquier combinación | 180 (3 h) |
+| `DAILY_LIMIT_PER_TOOL` | `true`: el límite es por herramienta. `false`: suma todas las herramientas | `true` |
 | `MAX_DAYS_AHEAD` | Hasta cuántos días adelante se reserva | 30 |
 | `ALLOWED_DOMAINS` | Dominios de correo permitidos | `[]` (todos) |
 | `SENDER_NAME` | Nombre del remitente en los correos | Reservas AP Latam |

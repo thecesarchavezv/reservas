@@ -28,7 +28,9 @@ const CONFIG = {
   TIMEZONE: 'America/Mexico_City',  // Zona horaria por defecto para correos
   BUFFER_MIN: 15,                   // Minutos mínimos entre una reserva y la siguiente
   MIN_DURATION_MIN: 15,             // Duración mínima de una reserva
-  MAX_DURATION_MIN: 240,            // Duración máxima de una reserva (4 h)
+  MAX_DURATION_MIN: 180,            // Duración máxima de una sola reserva (3 h)
+  MAX_MIN_PER_DAY: 180,             // Máximo de minutos que una persona puede reservar por día calendario (3 h)
+  DAILY_LIMIT_PER_TOOL: true,       // true: el límite diario cuenta por herramienta. false: suma todas las herramientas
   MAX_DAYS_AHEAD: 30,               // Hasta cuántos días adelante se puede reservar
   ALLOWED_DOMAINS: ['aplatam.com'], // Dominios permitidos. [] = cualquier correo
   CODE_TTL_MIN: 10,                 // Vigencia del código de acceso
@@ -225,6 +227,9 @@ function apiState_(b) {
       minDurationMin: CONFIG.MIN_DURATION_MIN,
       maxDurationMin: CONFIG.MAX_DURATION_MIN,
       maxDaysAhead: CONFIG.MAX_DAYS_AHEAD,
+      maxMinPerDay: CONFIG.MAX_MIN_PER_DAY,
+      dailyLimitPerTool: CONFIG.DAILY_LIMIT_PER_TOOL,
+      timezone: CONFIG.TIMEZONE,
     },
   };
 }
@@ -240,7 +245,7 @@ function apiCreate_(b) {
   const nowMin = Math.floor(Date.now() / MIN) * MIN;
   if (start < nowMin && start >= nowMin - 15 * MIN) start = nowMin;
   return withLock_(function () {
-    validateSlot_(start, end, null, null, tool);
+    validateSlot_(start, end, null, null, tool, email);
     const u = findRow_('Usuarios', 'email', email);
     const id = Utilities.getUuid().slice(0, 8);
     appendRow_('Reservas', {
@@ -261,7 +266,7 @@ function apiUpdate_(b) {
   const note = String(b.note || '').trim().slice(0, 200);
   return withLock_(function () {
     const found = ownRes_(b.id, email);
-    validateSlot_(start, end, found.row.id, found.row, toolOf_(found.row));
+    validateSlot_(start, end, found.row.id, found.row, toolOf_(found.row), email);
     const changes = {
       inicio_ms: start, fin_ms: end, inicio: fmtDate_(start, CONFIG.TIMEZONE), fin: fmtDate_(end, CONFIG.TIMEZONE),
       nota: note, actualizado: new Date(),
@@ -309,12 +314,13 @@ function ownRes_(id, email) {
 }
 
 /** Reglas de negocio: duración, ventana permitida y separación de 15 min. */
-function validateSlot_(start, end, ignoreId, existing, tool) {
+function validateSlot_(start, end, ignoreId, existing, tool, email) {
   const now = Date.now();
   if (!isFinite(start) || !isFinite(end)) fail_('Fecha u hora inválida.');
   if (end <= start) fail_('La hora de fin debe ser posterior a la de inicio.');
   const dur = (end - start) / MIN;
   if (dur < CONFIG.MIN_DURATION_MIN) fail_('La reserva mínima es de ' + CONFIG.MIN_DURATION_MIN + ' minutos.');
+  checkDailyLimit_(email, tool, start, end, ignoreId);
   if (dur > CONFIG.MAX_DURATION_MIN) fail_('La reserva máxima es de ' + fmtDur_(CONFIG.MAX_DURATION_MIN) + '.');
   const keepsStart = existing && Number(existing.inicio_ms) === start && start <= now;
   if (start < now - 2 * MIN && !keepsStart) fail_('No puedes reservar en el pasado.');
@@ -332,6 +338,45 @@ function validateSlot_(start, end, ignoreId, existing, tool) {
       fmtTime_(Number(clash.fin_ms), CONFIG.TIMEZONE) + ', hora CDMX). Recuerda dejar ' + CONFIG.BUFFER_MIN +
       ' min entre turnos.', 'CONFLICT');
   }
+}
+
+/** Día calendario (zona de CONFIG) de un instante, como "2026-11-19". */
+function dayKey_(ms) { return Utilities.formatDate(new Date(ms), CONFIG.TIMEZONE, 'yyyy-MM-dd'); }
+
+/** Suma a `acc` los minutos de [start, end) por día calendario (parte en dos si cruza la medianoche). */
+function minutesByDay_(start, end, acc) {
+  acc = acc || {};
+  if (dayKey_(start) === dayKey_(end - 1)) {
+    const k = dayKey_(start);
+    acc[k] = (acc[k] || 0) + (end - start) / MIN;
+    return acc;
+  }
+  for (let t = start; t < end; t += MIN) { const k = dayKey_(t); acc[k] = (acc[k] || 0) + 1; }
+  return acc;
+}
+
+/** Límite diario por persona: sus reservas activas de ese día (ya usadas o por venir) + la nueva. */
+function checkDailyLimit_(email, tool, start, end, ignoreId) {
+  if (!email || !CONFIG.MAX_MIN_PER_DAY) return;
+  const wanted = minutesByDay_(start, end);
+  const used = {};
+  const day = 24 * 60 * MIN;
+  readAll_('Reservas').forEach(function (r) {
+    if (r.estado !== 'activa' || r.id === ignoreId || normEmail_(r.email) !== email) return;
+    if (CONFIG.DAILY_LIMIT_PER_TOOL && toolOf_(r) !== tool) return;
+    const s = Number(r.inicio_ms), e = Number(r.fin_ms);
+    if (e <= start - day || s >= end + day || e <= s) return;
+    minutesByDay_(s, e, used);
+  });
+  Object.keys(wanted).forEach(function (k) {
+    const already = used[k] || 0;
+    if (already + wanted[k] > CONFIG.MAX_MIN_PER_DAY) {
+      const left = Math.max(0, CONFIG.MAX_MIN_PER_DAY - already);
+      fail_('Superaste el máximo de ' + fmtDur_(CONFIG.MAX_MIN_PER_DAY) + ' por día. Como la herramienta es compartida, te invitamos a aprovechar al máximo tu tiempo asignado para dar espacio a los demás compañeros.' +
+        (left > 0 ? ' Ese día aún puedes reservar hasta ' + fmtDur_(left) + '.' : ' Ya usaste todo tu tiempo de ese día.'),
+        'DAILY_LIMIT');
+    }
+  });
 }
 
 // =============================================================
