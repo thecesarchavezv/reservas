@@ -554,7 +554,7 @@ function bandView(){
       const gapEnd = nx.start - c.bufferMin*MIN;
       const canUse = (gapEnd - t)/MIN;
       text = canUse >= c.minDurationMin
-        ? 'Puedes usarla ya, hasta las ' + time(gapEnd) + '. Después sigue ' + (isMine(nx) ? 'tu turno' : 'el turno de ' + esc(firstName(nx.name))) + ', ' + dotEnd(whenText(nx.start))
+        ? 'Puedes usarla ya, hasta las ' + dotEnd(time(gapEnd)) + ' Después sigue ' + (isMine(nx) ? 'tu turno' : 'el turno de ' + esc(firstName(nx.name))) + ', ' + dotEnd(whenText(nx.start))
         : 'El siguiente turno es de ' + (isMine(nx) ? 'ti' : esc(firstName(nx.name))) + ', ' + dotEnd(whenText(nx.start));
     } else text = 'No hay turnos próximos. Aparta tu espacio y empieza cuando quieras.';
     const fitsNow = !nx || (nx.start - c.bufferMin*MIN - t)/MIN >= c.minDurationMin;
